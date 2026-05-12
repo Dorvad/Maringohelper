@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  font-family: "Assistant", "Heebo", Inter, system-ui, sans-serif;
+  background: #b9b8f4;
+  color: #20202a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  direction: rtl;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.55), transparent 32rem),
+    linear-gradient(180deg, #c8c7ff 0%, #b9b8f4 44%, #f4f3ff 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input,
+textarea {
+  outline: none;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(98, 101, 216, 0.35);
+  border-radius: 999px;
+}
+
+@layer components {
+  .app-shell {
+    @apply mx-auto min-h-dvh w-full max-w-[430px] overflow-hidden bg-app-bg text-app-text shadow-floating md:max-w-[1100px] md:rounded-none;
+  }
+
+  .app-page {
+    @apply min-h-dvh px-4 pb-28 pt-5 md:px-8 md:pb-10;
+  }
+
+  .soft-card {
+    @apply rounded-[2rem] bg-white shadow-card;
+  }
+
+  .glass-card {
+    @apply rounded-[1.75rem] border border-white/40 bg-white/45 shadow-soft backdrop-blur-xl;
+  }
+
+  .pill-button {
+    @apply inline-flex min-h-12 items-center justify-center rounded-full px-5 text-sm font-bold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .focus-ring {
+    @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-dark;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
