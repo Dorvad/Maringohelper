@@ -6,11 +6,12 @@ import type { DayRecord } from "../types";
 type ProgressHeroProps = {
   date: string;
   day?: DayRecord;
+  targetHours?: number;
   onAdd: () => void;
 };
 
-export function ProgressHero({ date, day, onAdd }: ProgressHeroProps) {
-  const target = day?.targetHours ?? DEFAULT_TARGET_HOURS;
+export function ProgressHero({ date, day, targetHours = DEFAULT_TARGET_HOURS, onAdd }: ProgressHeroProps) {
+  const target = day?.targetHours ?? targetHours;
   const total = sumEntries(day?.entries ?? []);
   const remaining = remainingHours(day, target);
   const percent = Math.min(100, Math.round((total / target) * 100));

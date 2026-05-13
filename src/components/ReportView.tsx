@@ -1,5 +1,5 @@
 import { CheckCircle2, Copy } from "lucide-react";
-import type { DayRecord, Project } from "../types";
+import type { Client, DayRecord, Project } from "../types";
 import { formatDisplayDate, weekdayName } from "../lib/dates";
 import { formatHours, getDayStatus, sumEntries } from "../lib/hours";
 import { IconButton } from "./IconButton";
@@ -7,11 +7,12 @@ import { IconButton } from "./IconButton";
 type ReportViewProps = {
   days: DayRecord[];
   projects: Project[];
+  clients: Client[];
   onCopy: (day: DayRecord) => void;
   onToggleSubmitted: (day: DayRecord) => void;
 };
 
-export function ReportView({ days, projects, onCopy, onToggleSubmitted }: ReportViewProps) {
+export function ReportView({ days, projects, clients, onCopy, onToggleSubmitted }: ReportViewProps) {
   const reportDays = days
     .filter((day) => day.entries.length > 0 || day.isNonWorkDay)
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -20,7 +21,7 @@ export function ReportView({ days, projects, onCopy, onToggleSubmitted }: Report
     return (
       <section className="soft-card p-6 text-center">
         <h2 className="text-xl font-black">אין עדיין נתונים לחודש הזה</h2>
-        <p className="mt-2 text-sm text-app-secondary">אחרי שתזין שעות, יופיע כאן מצב הזנה למרינגו.</p>
+        <p className="mt-2 text-sm text-app-secondary">בחר יום, הוסף שעות לפי לקוח ופרויקט, ואז מצב מרינגו יציג כאן את מה להעתיק.</p>
       </section>
     );
   }
@@ -44,13 +45,22 @@ export function ReportView({ days, projects, onCopy, onToggleSubmitted }: Report
             <div className="space-y-2">
               {day.entries.map((entry) => {
                 const project = projects.find((item) => item.id === entry.projectId);
+                const client = clients.find((item) => item.id === entry.clientId);
                 return (
-                  <div key={entry.id} className="flex items-center justify-between gap-3 rounded-2xl bg-app-soft px-4 py-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-black text-app-text">{project?.name ?? "פרויקט שנמחק"}</p>
-                      {project?.maringoCode ? <p className="text-xs font-bold text-app-secondary">קוד: {project.maringoCode}</p> : null}
+                  <div key={entry.id} className="rounded-2xl bg-app-soft px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-black text-app-secondary">{client?.name ?? "ללא לקוח"}</p>
+                        <p className="truncate text-sm font-black text-app-text">{project?.name ?? "פרויקט שנמחק"}</p>
+                        <p className="text-xs font-bold text-app-secondary">
+                          {client?.code ? `לקוח: ${client.code}` : ""}
+                          {client?.code && project?.maringoCode ? " · " : ""}
+                          {project?.maringoCode ? `פרויקט: ${project.maringoCode}` : ""}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-sm font-black">{entry.hours}</p>
                     </div>
-                    <p className="shrink-0 text-sm font-black">{entry.hours}</p>
+                    {entry.note ? <p className="mt-2 text-sm font-bold text-app-secondary">{entry.note}</p> : null}
                   </div>
                 );
               })}
@@ -61,11 +71,7 @@ export function ReportView({ days, projects, onCopy, onToggleSubmitted }: Report
                 <Copy size={18} />
                 העתק יום
               </button>
-              <IconButton
-                label={day.submittedToMaringo ? "בטל סימון כהוזן" : "סמן כהוזן במרינגו"}
-                onClick={() => onToggleSubmitted(day)}
-                className={day.submittedToMaringo ? "bg-app-success text-white" : "bg-app-soft shadow-none"}
-              >
+              <IconButton label={day.submittedToMaringo ? "בטל סימון כהוזן" : "סמן כהוזן במרינגו"} onClick={() => onToggleSubmitted(day)} className={day.submittedToMaringo ? "bg-app-success text-white" : "bg-app-soft shadow-none"}>
                 <CheckCircle2 size={20} />
               </IconButton>
             </div>

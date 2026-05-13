@@ -9,13 +9,31 @@ import { EntryList } from "./components/EntryList";
 import { MonthGrid } from "./components/MonthGrid";
 import { ProgressHero } from "./components/ProgressHero";
 import { ProjectsView } from "./components/ProjectsView";
+import { RemindersSheet } from "./components/RemindersSheet";
 import { ReportView } from "./components/ReportView";
+import { SettingsSheet } from "./components/SettingsSheet";
 import { StatCard } from "./components/StatCard";
-import { addProject, addTimeEntry, db, deleteTimeEntry, seedDatabaseIfNeeded, setSubmittedToMaringo, toggleProjectActive, toggleProjectFavorite } from "./lib/db";
+import {
+  addClient,
+  addProject,
+  addTimeEntry,
+  db,
+  deleteTimeEntry,
+  importBackupData,
+  seedDatabaseIfNeeded,
+  setSubmittedToMaringo,
+  toggleClientActive,
+  toggleClientFavorite,
+  toggleProjectActive,
+  toggleProjectFavorite,
+  updateTimeEntry,
+  validateBackupData,
+} from "./lib/db";
 import { dayToCopyText, downloadBackupJson, downloadTextFile, makeCsv } from "./lib/export";
-import { DEFAULT_TARGET_HOURS, formatHours, getDayStatus, remainingHours, sumEntries } from "./lib/hours";
-import { formatMonthTitle, getMonthDays, isWeekend, monthKeyFromDate, todayISO } from "./lib/dates";
-import type { DayRecord, Project, ViewKey } from "./types";
+import { formatHours, getDayStatus, remainingHours, sumEntries } from "./lib/hours";
+import { formatMonthTitle, getMonthDays, monthKeyFromDate, parseISODate, todayISO } from "./lib/dates";
+import { loadSettings, saveSettings } from "./lib/settings";
+import type { AppSettings, Client, DayRecord, Project, TimeEntry, ViewKey } from "./types";
 
 export default function App() {
   const today = todayISO();
@@ -23,12 +41,17 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(today);
   const [monthKey, setMonthKey] = useState(monthKeyFromDate(today));
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [entryToEdit, setEntryToEdit] = useState<TimeEntry | undefined>();
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isRemindersOpen, setIsRemindersOpen] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
   useEffect(() => {
     void seedDatabaseIfNeeded();
   }, []);
 
   const projects = useLiveQuery(() => db.projects.orderBy("order").toArray(), [], []);
+  const clients = useLiveQuery(() => db.clients.orderBy("order").toArray(), [], []);
   const selectedDay = useLiveQuery(() => db.days.get(selectedDate), [selectedDate]);
   const monthDays = useLiveQuery(
     () => db.days.where("date").between(`${monthKey}-01`, `${monthKey}-31`, true, true).toArray(),
@@ -38,10 +61,24 @@ export default function App() {
 
   const monthCalendarDays = useMemo(() => getMonthDays(monthKey), [monthKey]);
   const monthByDate = useMemo(() => new Map((monthDays ?? []).map((day) => [day.date, day])), [monthDays]);
-  const monthSummary = useMemo(() => buildMonthSummary(monthCalendarDays, monthByDate), [monthCalendarDays, monthByDate]);
+  const monthSummary = useMemo(() => buildMonthSummary(monthCalendarDays, monthByDate, settings), [monthCalendarDays, monthByDate, settings]);
 
-  async function handleAddEntry(input: { projectId: string; hours: number; note?: string }) {
-    await addTimeEntry(selectedDate, input);
+  async function handleEntrySubmit(input: { projectId: string; clientId?: string; hours: number; note?: string }) {
+    if (entryToEdit) {
+      await updateTimeEntry(selectedDate, entryToEdit.id, input);
+    } else {
+      await addTimeEntry(selectedDate, input, settings.dailyTargetHours);
+    }
+  }
+
+  function handleEditEntry(entry: TimeEntry) {
+    setEntryToEdit(entry);
+    setIsAddOpen(true);
+  }
+
+  function handleCloseEntrySheet() {
+    setIsAddOpen(false);
+    setEntryToEdit(undefined);
   }
 
   function handleSelectDate(date: string) {
@@ -49,8 +86,12 @@ export default function App() {
     setMonthKey(monthKeyFromDate(date));
   }
 
+  function handleSettingsChange(nextSettings: AppSettings) {
+    setSettings(saveSettings(nextSettings));
+  }
+
   function exportCsv() {
-    const csv = makeCsv(monthDays ?? [], projects ?? []);
+    const csv = makeCsv(monthDays ?? [], projects ?? [], clients ?? []);
     downloadTextFile(`maringo-report-${monthKey}.csv`, csv, "text/csv;charset=utf-8");
   }
 
@@ -58,21 +99,35 @@ export default function App() {
     await downloadBackupJson();
   }
 
+  async function handleImportBackup(file: File, mode: "replace" | "merge") {
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (!validateBackupData(parsed)) {
+        window.alert("קובץ הגיבוי לא נראה תקין.");
+        return;
+      }
+      await importBackupData(parsed, mode);
+      window.alert(mode === "replace" ? "הגיבוי יובא והחליף את הנתונים." : "הגיבוי מוזג לנתונים הקיימים.");
+    } catch {
+      window.alert("לא הצלחתי לקרוא את קובץ הגיבוי.");
+    }
+  }
+
   async function handleCopyDay(day: DayRecord) {
-    const text = dayToCopyText(day, projects ?? []);
+    const text = dayToCopyText(day, projects ?? [], clients ?? []);
     await navigator.clipboard.writeText(text);
     window.alert("הפירוט הועתק ללוח.");
   }
 
   async function handleToggleSubmitted(day: DayRecord) {
-    await setSubmittedToMaringo(day.date, !day.submittedToMaringo);
+    await setSubmittedToMaringo(day.date, !day.submittedToMaringo, settings.dailyTargetHours);
   }
 
   const titleByView: Record<ViewKey, string> = {
     home: "בוא נסגור את היום.",
     month: "מבט חודשי.",
     report: "דוח להזנה במרינגו.",
-    projects: "הפרויקטים שלך.",
+    projects: "ניהול פרויקטים ולקוחות.",
   };
 
   return (
@@ -81,33 +136,13 @@ export default function App() {
 
       <main className="app-shell flex-1 md:max-w-none md:bg-transparent md:shadow-none">
         <div className="app-page">
-          <AppHeader
-            title={titleByView[activeView]}
-            subtitle={activeView === "report" ? formatMonthTitle(monthKey) : undefined}
-            onExport={handleBackup}
-          />
+          <AppHeader title={titleByView[activeView]} subtitle={activeView === "report" ? formatMonthTitle(monthKey) : undefined} onExport={handleBackup} onReminders={() => setIsRemindersOpen(true)} onSettings={() => setIsSettingsOpen(true)} />
 
           {activeView === "home" ? (
-            <HomeView
-              date={selectedDate}
-              day={selectedDay}
-              projects={projects ?? []}
-              monthSummary={monthSummary}
-              onAdd={() => setIsAddOpen(true)}
-              onDelete={(entryId) => deleteTimeEntry(selectedDate, entryId)}
-            />
+            <HomeView date={selectedDate} day={selectedDay} projects={projects ?? []} clients={clients ?? []} settings={settings} monthSummary={monthSummary} onAdd={() => setIsAddOpen(true)} onEdit={handleEditEntry} onDelete={(entryId) => deleteTimeEntry(selectedDate, entryId)} />
           ) : null}
 
-          {activeView === "month" ? (
-            <MonthView
-              monthKey={monthKey}
-              days={monthDays ?? []}
-              selectedDate={selectedDate}
-              onMonthChange={setMonthKey}
-              onSelectDate={handleSelectDate}
-              onAdd={() => setIsAddOpen(true)}
-            />
-          ) : null}
+          {activeView === "month" ? <MonthView monthKey={monthKey} days={monthDays ?? []} selectedDate={selectedDate} settings={settings} onMonthChange={setMonthKey} onSelectDate={handleSelectDate} onAdd={() => setIsAddOpen(true)} /> : null}
 
           {activeView === "report" ? (
             <div className="space-y-4">
@@ -116,34 +151,22 @@ export default function App() {
                   <p className="text-sm font-bold text-app-secondary">{formatMonthTitle(monthKey)}</p>
                   <h2 className="text-2xl font-black tracking-[-0.04em]">{monthSummary.submittedDays} ימים כבר סומנו כהוזנו</h2>
                 </div>
-                <button type="button" onClick={exportCsv} className="pill-button focus-ring bg-app-dark text-white">
-                  ייצוא CSV
-                </button>
+                <button type="button" onClick={exportCsv} className="pill-button focus-ring bg-app-dark text-white">ייצוא CSV</button>
               </section>
-              <ReportView days={monthDays ?? []} projects={projects ?? []} onCopy={handleCopyDay} onToggleSubmitted={handleToggleSubmitted} />
+              <ReportView days={monthDays ?? []} projects={projects ?? []} clients={clients ?? []} onCopy={handleCopyDay} onToggleSubmitted={handleToggleSubmitted} />
             </div>
           ) : null}
 
           {activeView === "projects" ? (
-            <ProjectsView
-              projects={projects ?? []}
-              onAddProject={addProject}
-              onToggleActive={toggleProjectActive}
-              onToggleFavorite={toggleProjectFavorite}
-            />
+            <ProjectsView projects={projects ?? []} clients={clients ?? []} onAddProject={addProject} onAddClient={addClient} onToggleProjectActive={toggleProjectActive} onToggleProjectFavorite={toggleProjectFavorite} onToggleClientActive={toggleClientActive} onToggleClientFavorite={toggleClientFavorite} />
           ) : null}
         </div>
       </main>
 
       <BottomNav activeView={activeView} onChange={setActiveView} onAdd={() => setIsAddOpen(true)} />
-      <AddEntrySheet
-        isOpen={isAddOpen}
-        date={selectedDate}
-        day={selectedDay}
-        projects={projects ?? []}
-        onClose={() => setIsAddOpen(false)}
-        onSubmit={handleAddEntry}
-      />
+      <AddEntrySheet isOpen={isAddOpen} date={selectedDate} day={selectedDay} projects={projects ?? []} clients={clients ?? []} entryToEdit={entryToEdit} settings={settings} onClose={handleCloseEntrySheet} onSubmit={handleEntrySubmit} />
+      <SettingsSheet isOpen={isSettingsOpen} settings={settings} onClose={() => setIsSettingsOpen(false)} onChange={handleSettingsChange} onImportBackup={handleImportBackup} />
+      <RemindersSheet isOpen={isRemindersOpen} onClose={() => setIsRemindersOpen(false)} />
     </div>
   );
 }
@@ -152,19 +175,22 @@ type HomeViewProps = {
   date: string;
   day?: DayRecord;
   projects: Project[];
+  clients: Client[];
+  settings: AppSettings;
   monthSummary: ReturnType<typeof buildMonthSummary>;
   onAdd: () => void;
+  onEdit: (entry: TimeEntry) => void;
   onDelete: (entryId: string) => void;
 };
 
-function HomeView({ date, day, projects, monthSummary, onAdd, onDelete }: HomeViewProps) {
+function HomeView({ date, day, projects, clients, settings, monthSummary, onAdd, onEdit, onDelete }: HomeViewProps) {
   const total = sumEntries(day?.entries ?? []);
-  const remaining = remainingHours(day, DEFAULT_TARGET_HOURS);
+  const remaining = remainingHours(day, settings.dailyTargetHours);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
       <div>
-        <ProgressHero date={date} day={day} onAdd={onAdd} />
+        <ProgressHero date={date} day={day} targetHours={settings.dailyTargetHours} onAdd={onAdd} />
         <div className="mb-5 grid grid-cols-2 gap-3">
           <StatCard label="היום" value={total} hint="שעות מולאו" />
           <StatCard label="נותרו" value={remaining} hint="להשלמה" />
@@ -176,9 +202,9 @@ function HomeView({ date, day, projects, monthSummary, onAdd, onDelete }: HomeVi
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-xl font-black tracking-[-0.04em]">הפירוט של היום</h2>
-          <span className="rounded-full bg-white/55 px-3 py-1 text-xs font-black text-app-secondary">{getStatusLabel(getDayStatus(day))}</span>
+          <span className="rounded-full bg-white/55 px-3 py-1 text-xs font-black text-app-secondary">{getStatusLabel(getDayStatus(day, settings.dailyTargetHours))}</span>
         </div>
-        <EntryList day={day} projects={projects} onDelete={onDelete} />
+        <EntryList day={day} projects={projects} clients={clients} onEdit={onEdit} onDelete={onDelete} />
       </section>
     </div>
   );
@@ -188,29 +214,28 @@ type MonthViewProps = {
   monthKey: string;
   days: DayRecord[];
   selectedDate: string;
+  settings: AppSettings;
   onMonthChange: (monthKey: string) => void;
   onSelectDate: (date: string) => void;
   onAdd: () => void;
 };
 
-function MonthView({ monthKey, days, selectedDate, onMonthChange, onSelectDate, onAdd }: MonthViewProps) {
+function MonthView({ monthKey, days, selectedDate, settings, onMonthChange, onSelectDate, onAdd }: MonthViewProps) {
   const daysByDate = new Map(days.map((day) => [day.date, day]));
   const missing = getMonthDays(monthKey).filter((date) => {
     const day = daysByDate.get(date);
-    const status = getDayStatus(day);
-    if (status === "empty" && isWeekend(date)) return false;
+    const status = getDayStatus(day, settings.dailyTargetHours);
+    if (!settings.workingDays.includes(parseISODate(date).getDay())) return false;
     return status === "partial" || status === "over" || status === "empty";
   });
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <MonthGrid monthKey={monthKey} days={days} selectedDate={selectedDate} onMonthChange={onMonthChange} onSelectDate={onSelectDate} />
+      <MonthGrid monthKey={monthKey} days={days} selectedDate={selectedDate} targetHours={settings.dailyTargetHours} onMonthChange={onMonthChange} onSelectDate={onSelectDate} />
 
       <section className="soft-card p-5">
         <div className="mb-4 flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-full bg-app-muted text-app-primary">
-            <CalendarCheck2 size={22} />
-          </div>
+          <div className="grid h-12 w-12 place-items-center rounded-full bg-app-muted text-app-primary"><CalendarCheck2 size={22} /></div>
           <div>
             <p className="text-sm font-bold text-app-secondary">ימים שדורשים טיפול</p>
             <h2 className="text-2xl font-black tracking-[-0.04em]">{missing.length} ימים</h2>
@@ -219,30 +244,22 @@ function MonthView({ monthKey, days, selectedDate, onMonthChange, onSelectDate, 
         <div className="max-h-[460px] space-y-2 overflow-auto pe-1">
           {missing.slice(0, 16).map((date) => {
             const day = daysByDate.get(date);
-            const remaining = remainingHours(day, DEFAULT_TARGET_HOURS);
+            const remaining = remainingHours(day, settings.dailyTargetHours);
             return (
-              <button
-                key={date}
-                type="button"
-                onClick={() => {
-                  onSelectDate(date);
-                  onAdd();
-                }}
-                className="focus-ring flex w-full items-center justify-between rounded-3xl bg-app-soft px-4 py-3 text-right transition active:scale-[0.99]"
-              >
+              <button key={date} type="button" onClick={() => { onSelectDate(date); onAdd(); }} className="focus-ring flex w-full items-center justify-between rounded-3xl bg-app-soft px-4 py-3 text-right transition active:scale-[0.99]">
                 <span className="font-black">{date.slice(-2)}.{date.slice(5, 7)}</span>
                 <span className="text-sm font-bold text-app-secondary">חסרות {formatHours(remaining)}</span>
               </button>
             );
           })}
-          {missing.length === 0 ? <p className="rounded-3xl bg-app-soft p-4 text-sm font-bold text-app-secondary">החודש נראה מסודר.</p> : null}
+          {missing.length === 0 ? <p className="rounded-3xl bg-app-soft p-4 text-sm font-bold text-app-secondary">אין ימים חסרים לחודש הזה. אם חסר משהו, בחר יום בלוח והוסף שעות.</p> : null}
         </div>
       </section>
     </div>
   );
 }
 
-function buildMonthSummary(monthDates: string[], daysByDate: Map<string, DayRecord>) {
+function buildMonthSummary(monthDates: string[], daysByDate: Map<string, DayRecord>, settings: AppSettings) {
   let totalHours = 0;
   let completeDays = 0;
   let partialDays = 0;
@@ -251,21 +268,15 @@ function buildMonthSummary(monthDates: string[], daysByDate: Map<string, DayReco
 
   monthDates.forEach((date) => {
     const day = daysByDate.get(date);
-    const status = getDayStatus(day);
+    const status = getDayStatus(day, settings.dailyTargetHours);
     totalHours += sumEntries(day?.entries ?? []);
     if (status === "complete") completeDays += 1;
     if (status === "partial" || status === "over") partialDays += 1;
-    if (status === "empty" && !isWeekend(date)) emptyWorkDays += 1;
+    if (status === "empty" && settings.workingDays.includes(parseISODate(date).getDay())) emptyWorkDays += 1;
     if (day?.submittedToMaringo) submittedDays += 1;
   });
 
-  return {
-    totalHours,
-    completeDays,
-    partialDays,
-    emptyWorkDays,
-    submittedDays,
-  };
+  return { totalHours, completeDays, partialDays, emptyWorkDays, submittedDays };
 }
 
 function getStatusLabel(status: string) {
