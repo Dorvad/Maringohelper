@@ -1,4 +1,4 @@
-import type { DayRecord, Project } from "../types";
+import type { Client, DayRecord, Project } from "../types";
 import { formatDisplayDate, weekdayName } from "./dates";
 import { exportAllData } from "./db";
 
@@ -12,18 +12,18 @@ export function downloadTextFile(filename: string, contents: string, type = "tex
   URL.revokeObjectURL(url);
 }
 
-export function dayToCopyText(day: DayRecord, projects: Project[]): string {
+export function dayToCopyText(day: DayRecord, projects: Project[], clients: Client[]): string {
   const lines = [`${weekdayName(day.date)} · ${formatDisplayDate(day.date)}`];
   day.entries.forEach((entry) => {
     const project = projects.find((item) => item.id === entry.projectId);
-    const code = project?.maringoCode ? ` (${project.maringoCode})` : "";
-    lines.push(`${project?.name ?? "פרויקט שנמחק"}${code}: ${entry.hours}`);
+    const client = clients.find((item) => item.id === entry.clientId);
+    lines.push(`${client?.name ?? "ללא לקוח"} — ${project?.name ?? "פרויקט שנמחק"}: ${entry.hours}`);
   });
   return lines.join("\n");
 }
 
-export function makeCsv(days: DayRecord[], projects: Project[]): string {
-  const rows = [["date", "display_date", "weekday", "project_name", "project_code", "hours", "note", "submitted_to_maringo"]];
+export function makeCsv(days: DayRecord[], projects: Project[], clients: Client[]): string {
+  const rows = [["date", "display_date", "weekday", "client_name", "client_code", "project_name", "project_code", "hours", "note", "submitted_to_maringo"]];
 
   days
     .slice()
@@ -31,10 +31,13 @@ export function makeCsv(days: DayRecord[], projects: Project[]): string {
     .forEach((day) => {
       day.entries.forEach((entry) => {
         const project = projects.find((item) => item.id === entry.projectId);
+        const client = clients.find((item) => item.id === entry.clientId);
         rows.push([
           day.date,
           formatDisplayDate(day.date),
           weekdayName(day.date),
+          client?.name ?? "ללא לקוח",
+          client?.code ?? "",
           project?.name ?? "פרויקט שנמחק",
           project?.maringoCode ?? "",
           String(entry.hours),

@@ -9,11 +9,12 @@ type MonthGridProps = {
   monthKey: string;
   days: DayRecord[];
   selectedDate: string;
+  targetHours?: number;
   onMonthChange: (monthKey: string) => void;
   onSelectDate: (date: string) => void;
 };
 
-export function MonthGrid({ monthKey, days, selectedDate, onMonthChange, onSelectDate }: MonthGridProps) {
+export function MonthGrid({ monthKey, days, selectedDate, targetHours, onMonthChange, onSelectDate }: MonthGridProps) {
   const daysByDate = new Map(days.map((day) => [day.date, day]));
   const cells = getCalendarCells(monthKey);
 
@@ -39,7 +40,7 @@ export function MonthGrid({ monthKey, days, selectedDate, onMonthChange, onSelec
         {cells.map((date, index) => {
           if (!date) return <div key={`empty-${index}`} />;
           const day = daysByDate.get(date);
-          const status = getDayStatus(day);
+          const status = getDayStatus(day, targetHours);
           const active = selectedDate === date;
           return (
             <button

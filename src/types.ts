@@ -11,9 +11,21 @@ export type Project = {
   createdAt: string;
 };
 
+export type Client = {
+  id: string;
+  name: string;
+  code?: string;
+  color: string;
+  isActive: boolean;
+  isFavorite: boolean;
+  order: number;
+  createdAt: string;
+};
+
 export type TimeEntry = {
   id: string;
   projectId: string;
+  clientId?: string;
   hours: number;
   note?: string;
   createdAt: string;
@@ -28,6 +40,12 @@ export type DayRecord = {
   entries: TimeEntry[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type AppSettings = {
+  dailyTargetHours: number;
+  workingDays: number[];
+  allowOverTargetHours: boolean;
 };
 
 export type DayStatus = "empty" | "partial" | "complete" | "over" | "nonWork";
