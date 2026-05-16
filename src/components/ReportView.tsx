@@ -1,5 +1,5 @@
-import { CheckCircle2, Copy } from "lucide-react";
-import type { Client, DayRecord, Project } from "../types";
+import { CheckCircle2, Copy, Pencil } from "lucide-react";
+import type { Client, DayRecord, Project, TimeEntry } from "../types";
 import { formatDisplayDate, weekdayName } from "../lib/dates";
 import { formatHours, getDayStatus, sumEntries } from "../lib/hours";
 import { IconButton } from "./IconButton";
@@ -8,11 +8,12 @@ type ReportViewProps = {
   days: DayRecord[];
   projects: Project[];
   clients: Client[];
+  onEdit: (entry: TimeEntry, date: string) => void;
   onCopy: (day: DayRecord) => void;
   onToggleSubmitted: (day: DayRecord) => void;
 };
 
-export function ReportView({ days, projects, clients, onCopy, onToggleSubmitted }: ReportViewProps) {
+export function ReportView({ days, projects, clients, onEdit, onCopy, onToggleSubmitted }: ReportViewProps) {
   const reportDays = days
     .filter((day) => day.entries.length > 0 || day.isNonWorkDay)
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -58,7 +59,13 @@ export function ReportView({ days, projects, clients, onCopy, onToggleSubmitted 
                           {project?.maringoCode ? `פרויקט: ${project.maringoCode}` : ""}
                         </p>
                       </div>
-                      <p className="shrink-0 text-sm font-black">{entry.hours}</p>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <p className="text-sm font-black">{formatHours(entry.hours)}</p>
+                        <button type="button" onClick={() => onEdit(entry, day.date)} className="focus-ring inline-flex h-9 items-center gap-1 rounded-full bg-white px-3 text-xs font-black text-app-text transition active:scale-95" aria-label="ערוך שורת שעות">
+                          <Pencil size={15} />
+                          עריכה
+                        </button>
+                      </div>
                     </div>
                     {entry.note ? <p className="mt-2 text-sm font-bold text-app-secondary">{entry.note}</p> : null}
                   </div>

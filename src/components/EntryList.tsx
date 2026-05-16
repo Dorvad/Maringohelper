@@ -38,9 +38,10 @@ export function EntryList({ day, projects, clients, onEdit, onDelete }: EntryLis
               {entry.note ? <p className="mt-1 truncate text-sm text-app-secondary">{entry.note}</p> : null}
             </div>
             <div className="flex gap-2">
-              <IconButton label="ערוך שורת שעות" onClick={() => onEdit(entry)} className="h-10 w-10 bg-app-soft shadow-none">
-                <Pencil size={18} />
-              </IconButton>
+              <button type="button" onClick={() => onEdit(entry)} className="focus-ring inline-flex h-10 items-center gap-1 rounded-full bg-app-soft px-3 text-xs font-black text-app-text transition active:scale-95" aria-label="ערוך שורת שעות">
+                <Pencil size={16} />
+                עריכה
+              </button>
               <IconButton label="מחק שורת שעות" onClick={() => onDelete(entry.id)} className="h-10 w-10 bg-app-soft shadow-none">
                 <Trash2 size={18} />
               </IconButton>
