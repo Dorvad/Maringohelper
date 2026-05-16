@@ -10,11 +10,12 @@ type MonthGridProps = {
   days: DayRecord[];
   selectedDate: string;
   targetHours?: number;
+  todayDate?: string;
   onMonthChange: (monthKey: string) => void;
   onSelectDate: (date: string) => void;
 };
 
-export function MonthGrid({ monthKey, days, selectedDate, targetHours, onMonthChange, onSelectDate }: MonthGridProps) {
+export function MonthGrid({ monthKey, days, selectedDate, targetHours, todayDate, onMonthChange, onSelectDate }: MonthGridProps) {
   const daysByDate = new Map(days.map((day) => [day.date, day]));
   const cells = getCalendarCells(monthKey);
 
@@ -42,21 +43,24 @@ export function MonthGrid({ monthKey, days, selectedDate, targetHours, onMonthCh
           const day = daysByDate.get(date);
           const status = getDayStatus(day, targetHours);
           const active = selectedDate === date;
+          const isToday = todayDate === date;
           return (
             <button
               key={date}
               type="button"
               onClick={() => onSelectDate(date)}
               className={clsx(
-                "focus-ring relative min-h-14 rounded-full px-1 py-2 text-center text-xs font-black transition active:scale-95",
+                "focus-ring relative min-h-14 rounded-[1.25rem] px-1 py-2 text-center text-xs font-black transition active:scale-95",
                 active && "bg-app-dark text-white shadow-soft",
                 !active && status === "complete" && "bg-app-primary text-white",
                 !active && status === "partial" && "bg-app-warmSoft text-app-text",
                 !active && status === "over" && "bg-app-danger text-white",
                 !active && status === "empty" && "bg-app-soft text-app-secondary",
                 !active && status === "nonWork" && "bg-white text-app-secondary ring-1 ring-app-border",
+                isToday && "outline outline-2 outline-offset-2 outline-app-dark",
               )}
             >
+              {isToday ? <span className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-full bg-app-dark px-2 py-0.5 text-[9px] text-white">היום</span> : null}
               <span className="block text-sm">{Number(date.slice(-2))}</span>
               <span className="block text-[10px] opacity-80">{day ? sumEntries(day.entries) : ""}</span>
               {day?.submittedToMaringo ? (
