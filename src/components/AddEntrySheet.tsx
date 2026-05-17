@@ -27,6 +27,7 @@ export function AddEntrySheet({ isOpen, date, day, projects, clients, entryToEdi
   const [clientId, setClientId] = useState("");
   const [hours, setHours] = useState(1);
   const [note, setNote] = useState("");
+  const [overfillConfirmed, setOverfillConfirmed] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -34,6 +35,7 @@ export function AddEntrySheet({ isOpen, date, day, projects, clients, entryToEdi
     setClientId(entryToEdit?.clientId ?? clients.find((client) => client.name === "ללא לקוח")?.id ?? "");
     setHours(entryToEdit?.hours ?? Math.min(1, Math.max(0.5, remainingHours(day, day?.targetHours ?? settings.dailyTargetHours))));
     setNote(entryToEdit?.note ?? "");
+    setOverfillConfirmed(false);
   }, [clients, day, entryToEdit, isOpen, settings.dailyTargetHours]);
 
   const target = day?.targetHours ?? settings.dailyTargetHours ?? DEFAULT_TARGET_HOURS;
@@ -48,7 +50,10 @@ export function AddEntrySheet({ isOpen, date, day, projects, clients, entryToEdi
   async function handleSubmit() {
     if (!projectId || hours <= 0) return;
     if (willOverfill && !settings.allowOverTargetHours) return;
-    if (willOverfill && settings.allowOverTargetHours && !window.confirm(`היום עובר את מכסת ${target} השעות. לשמור כחריג?`)) return;
+    if (willOverfill && settings.allowOverTargetHours && !overfillConfirmed) {
+      setOverfillConfirmed(true);
+      return;
+    }
     await onSubmit({ projectId, clientId: clientId || undefined, hours, note: note.trim() || undefined });
     onClose();
   }
@@ -144,8 +149,15 @@ export function AddEntrySheet({ isOpen, date, day, projects, clients, entryToEdi
         <label className="mb-2 block text-sm font-black">הערה אופציונלית</label>
         <textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} className="mb-5 w-full resize-none rounded-[1.5rem] border border-app-border bg-white px-4 py-3 text-sm shadow-soft" placeholder="למשל: עבודה על מצגת, פגישות, עדכון תוכן..." />
 
+        {willOverfill && settings.allowOverTargetHours && overfillConfirmed ? (
+          <div className="mb-4 rounded-[1.5rem] bg-app-warmSoft p-4" role="alert">
+            <p className="text-sm font-black text-app-text">היום יעבור את מכסת {formatHours(target)}.</p>
+            <p className="mt-1 text-xs font-bold text-app-secondary">לחיצה נוספת תשמור את השורה כחריגה לבדיקה.</p>
+          </div>
+        ) : null}
+
         <button type="button" onClick={handleSubmit} disabled={!projectId || hours <= 0 || (willOverfill && !settings.allowOverTargetHours)} className="pill-button focus-ring w-full bg-app-dark text-white shadow-soft disabled:opacity-50">
-          {mode === "edit" ? "שמור שינוי" : "הוסף ליום"}
+          {willOverfill && settings.allowOverTargetHours && overfillConfirmed ? "שמור כחריגה" : mode === "edit" ? "שמור שינוי" : "הוסף ליום"}
         </button>
       </section>
     </div>

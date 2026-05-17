@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { AlertTriangle, CalendarCheck2, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CalendarCheck2, CheckCircle2, CheckCircle, Info, X, XCircle } from "lucide-react";
 import { AppHeader } from "./components/AppHeader";
 import { AddEntrySheet } from "./components/AddEntrySheet";
 import { BottomNav } from "./components/BottomNav";
@@ -18,8 +18,11 @@ import {
   addTimeEntry,
   db,
   deleteTimeEntry,
+  duplicatePreviousDayEntries,
+  applyDayTemplate,
   importBackupData,
   seedDatabaseIfNeeded,
+  setNonWorkDay,
   setSubmittedToMaringo,
   toggleClientActive,
   toggleClientFavorite,
@@ -32,7 +35,8 @@ import { dayToCopyText, downloadBackupJson, downloadTextFile, makeCsv } from "./
 import { formatHours, getDayStatus, remainingHours, sumEntries } from "./lib/hours";
 import { formatDisplayDate, formatMonthTitle, getMonthDays, monthKeyFromDate, parseISODate, todayISO, weekdayName } from "./lib/dates";
 import { loadSettings, saveSettings } from "./lib/settings";
-import type { AppSettings, Client, DayRecord, Project, TimeEntry, ViewKey } from "./types";
+import { deleteDayTemplate, loadDayTemplates, saveCurrentDayAsTemplate } from "./lib/templates";
+import type { AppSettings, Client, DayRecord, DayTemplate, Project, TimeEntry, ViewKey } from "./types";
 
 export default function App() {
   const today = todayISO();
@@ -44,6 +48,9 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isRemindersOpen, setIsRemindersOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+  const [dayTemplates, setDayTemplates] = useState<DayTemplate[]>(() => loadDayTemplates());
+  const [pendingDelete, setPendingDelete] = useState<{ date: string; entryId: string } | null>(null);
+  const [toast, setToast] = useState<{ message: string; tone?: ToastTone } | null>(null);
 
   useEffect(() => {
     void seedDatabaseIfNeeded();
@@ -68,8 +75,10 @@ export default function App() {
     const targetDate = entryToEdit?.date ?? selectedDate;
     if (entryToEdit) {
       await updateTimeEntry(targetDate, entryToEdit.entry.id, input);
+      showToast("שורת השעות עודכנה.");
     } else {
       await addTimeEntry(targetDate, input, settings.dailyTargetHours);
+      showToast("שורת השעות נוספה ליום.");
     }
   }
 
@@ -94,37 +103,109 @@ export default function App() {
     setSettings(saveSettings(nextSettings));
   }
 
+  function showToast(message: string, tone: ToastTone = "success") {
+    setToast({ message, tone });
+    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 2800);
+  }
+
   function exportCsv() {
-    const csv = makeCsv(monthDays ?? [], projects ?? [], clients ?? []);
-    downloadTextFile(`maringo-report-${monthKey}.csv`, csv, "text/csv;charset=utf-8");
+    try {
+      const csv = makeCsv(monthDays ?? [], projects ?? [], clients ?? []);
+      downloadTextFile(`maringo-report-${monthKey}.csv`, csv, "text/csv;charset=utf-8");
+      showToast("קובץ CSV ירד למכשיר.");
+    } catch {
+      showToast("ייצוא CSV נכשל. נסה שוב.", "error");
+    }
   }
 
   async function handleBackup() {
-    await downloadBackupJson();
+    try {
+      await downloadBackupJson();
+      showToast("גיבוי JSON ירד למכשיר.");
+    } catch {
+      showToast("ייצוא הגיבוי נכשל. נסה שוב.", "error");
+    }
   }
 
   async function handleImportBackup(file: File, mode: "replace" | "merge") {
     try {
       const parsed = JSON.parse(await file.text());
       if (!validateBackupData(parsed)) {
-        window.alert("קובץ הגיבוי לא נראה תקין.");
+        showToast("קובץ הגיבוי לא נראה תקין.", "error");
         return;
       }
       await importBackupData(parsed, mode);
-      window.alert(mode === "replace" ? "הגיבוי יובא והחליף את הנתונים." : "הגיבוי מוזג לנתונים הקיימים.");
+      showToast(mode === "replace" ? "הגיבוי יובא והחליף את הנתונים." : "הגיבוי מוזג לנתונים הקיימים.");
     } catch {
-      window.alert("לא הצלחתי לקרוא את קובץ הגיבוי.");
+      showToast("לא הצלחתי לקרוא את קובץ הגיבוי.", "error");
     }
   }
 
   async function handleCopyDay(day: DayRecord) {
     const text = dayToCopyText(day, projects ?? [], clients ?? []);
     await navigator.clipboard.writeText(text);
-    window.alert("הפירוט הועתק ללוח.");
+    showToast("הפירוט הועתק ללוח.");
+  }
+
+
+  async function handleDuplicatePreviousDay() {
+    const currentEntries = selectedDay?.entries ?? [];
+    if (currentEntries.length > 0) {
+      showToast("אפשר לשכפל רק ליום ריק.", "warning");
+      return;
+    }
+    const previousDay = await duplicatePreviousDayEntries(selectedDate, settings.dailyTargetHours);
+    if (!previousDay) {
+      showToast("לא נמצא יום קודם עם שעות לשכפול.", "info");
+      return;
+    }
+    showToast(`שוכפלו השעות מ-${formatDisplayDate(previousDay.date)}.`);
+  }
+
+  function handleSaveTemplate() {
+    if (!selectedDay || selectedDay.entries.length === 0) {
+      showToast("אין שעות ביום הזה לשמירה כתבנית.", "warning");
+      return;
+    }
+    const nextTemplates = saveCurrentDayAsTemplate({ name: `תבנית ${formatDisplayDate(selectedDate)}`, sourceDate: selectedDate, entries: selectedDay.entries });
+    setDayTemplates(nextTemplates);
+    showToast("היום נשמר כתבנית.");
+  }
+
+  async function handleApplyTemplate(template: DayTemplate) {
+    if ((selectedDay?.entries ?? []).length > 0) {
+      showToast("אפשר להחיל תבנית רק על יום ריק.", "warning");
+      return;
+    }
+    await applyDayTemplate(selectedDate, template, settings.dailyTargetHours);
+    showToast(`התבנית ${template.name} הוחלה על היום.`);
+  }
+
+  function handleDeleteTemplate(templateId: string) {
+    setDayTemplates(deleteDayTemplate(templateId));
+    showToast("התבנית נמחקה.");
   }
 
   async function handleToggleSubmitted(day: DayRecord) {
     await setSubmittedToMaringo(day.date, !day.submittedToMaringo, settings.dailyTargetHours);
+    showToast(day.submittedToMaringo ? "הסימון כהוזן בוטל." : "היום סומן כהוזן במרינגו.");
+  }
+
+  function handleDeleteEntry(date: string, entryId: string) {
+    setPendingDelete({ date, entryId });
+  }
+
+  async function confirmDeleteEntry() {
+    if (!pendingDelete) return;
+    await deleteTimeEntry(pendingDelete.date, pendingDelete.entryId);
+    setPendingDelete(null);
+    showToast("שורת השעות נמחקה.");
+  }
+
+  async function handleToggleNonWorkDay(date: string) {
+    const day = await db.days.get(date);
+    await setNonWorkDay(date, !(day?.isNonWorkDay ?? false), settings.dailyTargetHours);
+    showToast(day?.isNonWorkDay ? "היום סומן כיום עבודה." : "היום סומן כיום ללא עבודה.");
   }
 
   const titleByView: Record<ViewKey, string> = {
@@ -143,10 +224,10 @@ export default function App() {
           <AppHeader title={titleByView[activeView]} subtitle={activeView === "report" ? formatMonthTitle(monthKey) : undefined} onExport={handleBackup} onReminders={() => setIsRemindersOpen(true)} onSettings={() => setIsSettingsOpen(true)} />
 
           {activeView === "home" ? (
-            <HomeView date={selectedDate} today={today} day={selectedDay} monthDates={monthCalendarDays} monthDays={monthDays ?? []} projects={projects ?? []} clients={clients ?? []} settings={settings} monthSummary={monthSummary} onSelectDate={handleSelectDate} onAdd={() => setIsAddOpen(true)} onEdit={handleEditEntry} onDelete={(entryId) => deleteTimeEntry(selectedDate, entryId)} />
+            <HomeView date={selectedDate} today={today} day={selectedDay} monthDates={monthCalendarDays} monthDays={monthDays ?? []} projects={projects ?? []} clients={clients ?? []} settings={settings} monthSummary={monthSummary} onSelectDate={handleSelectDate} onAdd={() => setIsAddOpen(true)} onEdit={handleEditEntry} onDelete={(entryId) => handleDeleteEntry(selectedDate, entryId)} onDuplicatePreviousDay={handleDuplicatePreviousDay} onSaveTemplate={handleSaveTemplate} onApplyTemplate={handleApplyTemplate} onDeleteTemplate={handleDeleteTemplate} templates={dayTemplates} />
           ) : null}
 
-          {activeView === "month" ? <MonthView monthKey={monthKey} today={today} days={monthDays ?? []} selectedDate={selectedDate} settings={settings} onMonthChange={setMonthKey} onSelectDate={handleSelectDate} onAdd={() => setIsAddOpen(true)} /> : null}
+          {activeView === "month" ? <MonthView monthKey={monthKey} today={today} days={monthDays ?? []} selectedDate={selectedDate} settings={settings} onMonthChange={setMonthKey} onSelectDate={handleSelectDate} onAdd={() => setIsAddOpen(true)} onToggleNonWorkDay={handleToggleNonWorkDay} /> : null}
 
           {activeView === "report" ? (
             <div className="space-y-4">
@@ -157,7 +238,7 @@ export default function App() {
                 </div>
                 <button type="button" onClick={exportCsv} className="pill-button focus-ring bg-app-dark text-white">ייצוא CSV</button>
               </section>
-              <ReportView days={monthDays ?? []} projects={projects ?? []} clients={clients ?? []} onEdit={handleEditEntry} onCopy={handleCopyDay} onToggleSubmitted={handleToggleSubmitted} />
+              <ReportView monthDates={monthCalendarDays} days={monthDays ?? []} projects={projects ?? []} clients={clients ?? []} settings={settings} onSelectDate={handleSelectDate} onAdd={() => setIsAddOpen(true)} onEdit={handleEditEntry} onDelete={handleDeleteEntry} onCopy={handleCopyDay} onToggleSubmitted={handleToggleSubmitted} />
             </div>
           ) : null}
 
@@ -169,8 +250,10 @@ export default function App() {
 
       <BottomNav activeView={activeView} onChange={setActiveView} onAdd={() => setIsAddOpen(true)} />
       <AddEntrySheet isOpen={isAddOpen} date={sheetDate} day={sheetDay} projects={projects ?? []} clients={clients ?? []} entryToEdit={entryToEdit?.entry} settings={settings} onClose={handleCloseEntrySheet} onSubmit={handleEntrySubmit} />
-      <SettingsSheet isOpen={isSettingsOpen} settings={settings} onClose={() => setIsSettingsOpen(false)} onChange={handleSettingsChange} onImportBackup={handleImportBackup} />
+      <SettingsSheet isOpen={isSettingsOpen} settings={settings} onClose={() => setIsSettingsOpen(false)} onChange={handleSettingsChange} onExportBackup={handleBackup} onImportBackup={handleImportBackup} />
       <RemindersSheet isOpen={isRemindersOpen} onClose={() => setIsRemindersOpen(false)} />
+      {pendingDelete ? <ConfirmDialog title="למחוק שורת שעות?" text="המחיקה תבטל את סימון היום כהוזן במרינגו, כדי שלא תפספס עדכון." confirmLabel="מחק" onConfirm={() => void confirmDeleteEntry()} onCancel={() => setPendingDelete(null)} /> : null}
+      {toast ? <Toast message={toast.message} tone={toast.tone ?? "success"} onClose={() => setToast(null)} /> : null}
     </div>
   );
 }
@@ -189,9 +272,14 @@ type HomeViewProps = {
   onAdd: () => void;
   onEdit: (entry: TimeEntry) => void;
   onDelete: (entryId: string) => void;
+  onDuplicatePreviousDay: () => void;
+  onSaveTemplate: () => void;
+  onApplyTemplate: (template: DayTemplate) => void;
+  onDeleteTemplate: (templateId: string) => void;
+  templates: DayTemplate[];
 };
 
-function HomeView({ date, today, day, monthDates, monthDays, projects, clients, settings, monthSummary, onSelectDate, onAdd, onEdit, onDelete }: HomeViewProps) {
+function HomeView({ date, today, day, monthDates, monthDays, projects, clients, settings, monthSummary, onSelectDate, onAdd, onEdit, onDelete, onDuplicatePreviousDay, onSaveTemplate, onApplyTemplate, onDeleteTemplate, templates }: HomeViewProps) {
   const remaining = remainingHours(day, settings.dailyTargetHours);
   const daysByDate = new Map(monthDays.map((monthDay) => [monthDay.date, monthDay]));
   const workQueue = monthDates
@@ -210,6 +298,7 @@ function HomeView({ date, today, day, monthDates, monthDays, projects, clients, 
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
       <div>
         <ProgressHero date={date} day={day} targetHours={settings.dailyTargetHours} isToday={selectedIsToday} onAdd={onAdd} />
+        <ProductivityCard day={day} templates={templates} onDuplicatePreviousDay={onDuplicatePreviousDay} onSaveTemplate={onSaveTemplate} onApplyTemplate={onApplyTemplate} onDeleteTemplate={onDeleteTemplate} />
 
         <section className="mb-4 grid gap-3 sm:grid-cols-3">
           <FocusMetric label="נותרו ביום" value={remaining} tone={remaining === 0 ? "success" : "warm"} hint={selectedIsToday ? "לתאריך של היום" : "לתאריך הנבחר"} />
@@ -231,6 +320,67 @@ function HomeView({ date, today, day, monthDates, monthDays, projects, clients, 
         <EntryList day={day} projects={projects} clients={clients} onEdit={onEdit} onDelete={onDelete} />
       </section>
     </div>
+  );
+}
+
+
+type ProductivityCardProps = {
+  day?: DayRecord;
+  templates: DayTemplate[];
+  onDuplicatePreviousDay: () => void;
+  onSaveTemplate: () => void;
+  onApplyTemplate: (template: DayTemplate) => void;
+  onDeleteTemplate: (templateId: string) => void;
+};
+
+function ProductivityCard({ day, templates, onDuplicatePreviousDay, onSaveTemplate, onApplyTemplate, onDeleteTemplate }: ProductivityCardProps) {
+  const isEmpty = (day?.entries ?? []).length === 0;
+
+  return (
+    <section className="soft-card mb-4 p-5" aria-labelledby="productivity-title">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-app-secondary">קיצור יומי</p>
+          <h2 id="productivity-title" className="text-xl font-black tracking-[-0.04em]">שכפול ותבניות</h2>
+        </div>
+        <span className="rounded-full bg-app-soft px-3 py-2 text-xs font-black text-app-secondary">חוסך הקלדה</span>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        {isEmpty ? (
+          <button type="button" onClick={onDuplicatePreviousDay} className="pill-button focus-ring bg-app-dark text-white" aria-label="התחל מהיום הקודם עם שעות">
+            התחל מהיום הקודם
+          </button>
+        ) : (
+          <button type="button" onClick={onSaveTemplate} className="pill-button focus-ring bg-app-dark text-white" aria-label="שמור את היום הנוכחי כתבנית">
+            שמור כתבנית
+          </button>
+        )}
+        <button type="button" onClick={onSaveTemplate} disabled={isEmpty} className="pill-button focus-ring bg-app-soft text-app-text disabled:opacity-50" aria-label="שמור יום כתבנית לשימוש חוזר">
+          צור תבנית מהיום
+        </button>
+      </div>
+
+      {isEmpty && templates.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          <p className="text-sm font-black text-app-secondary">החל תבנית על היום הריק</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {templates.map((template) => (
+              <div key={template.id} className="flex shrink-0 items-center gap-1 rounded-full bg-app-soft p-1">
+                <button type="button" onClick={() => onApplyTemplate(template)} className="focus-ring rounded-full px-4 py-2 text-sm font-black text-app-text" aria-label={`החל את התבנית ${template.name}`}>
+                  {template.name}
+                </button>
+                <button type="button" onClick={() => onDeleteTemplate(template.id)} className="focus-ring rounded-full p-2 text-app-secondary" aria-label={`מחק את התבנית ${template.name}`}>
+                  <X size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {isEmpty && templates.length === 0 ? <p className="mt-3 text-sm font-bold text-app-secondary">אין עדיין תבניות. מלא יום רגיל ואז שמור אותו כתבנית.</p> : null}
+    </section>
   );
 }
 
@@ -325,10 +475,13 @@ type MonthViewProps = {
   onMonthChange: (monthKey: string) => void;
   onSelectDate: (date: string) => void;
   onAdd: () => void;
+  onToggleNonWorkDay: (date: string) => void;
 };
 
-function MonthView({ monthKey, today, days, selectedDate, settings, onMonthChange, onSelectDate, onAdd }: MonthViewProps) {
+function MonthView({ monthKey, today, days, selectedDate, settings, onMonthChange, onSelectDate, onAdd, onToggleNonWorkDay }: MonthViewProps) {
   const daysByDate = new Map(days.map((day) => [day.date, day]));
+  const selectedDay = daysByDate.get(selectedDate);
+  const selectedStatus = getDayStatus(selectedDay, settings.dailyTargetHours);
   const missing = getMonthDays(monthKey).filter((date) => {
     if (date > today) return false;
     const day = daysByDate.get(date);
@@ -347,6 +500,16 @@ function MonthView({ monthKey, today, days, selectedDate, settings, onMonthChang
           <div>
             <p className="text-sm font-bold text-app-secondary">ימים שדורשים טיפול עד היום</p>
             <h2 className="text-2xl font-black tracking-[-0.04em]">{missing.length} ימים</h2>
+          </div>
+        </div>
+
+        <div className="mb-4 rounded-[1.75rem] bg-app-soft p-4">
+          <p className="text-xs font-black text-app-secondary">היום שנבחר</p>
+          <h3 className="mt-1 text-xl font-black tracking-[-0.04em]">{weekdayName(selectedDate)} · {formatDisplayDate(selectedDate)}</h3>
+          <p className="mt-1 text-sm font-bold text-app-secondary">סטטוס: {getStatusLabel(selectedStatus)} · סה״כ {formatHours(sumEntries(selectedDay?.entries ?? []))}</p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button type="button" onClick={onAdd} className="pill-button focus-ring bg-app-dark text-white">הוסף שעות</button>
+            <button type="button" onClick={() => onToggleNonWorkDay(selectedDate)} className="pill-button focus-ring bg-white text-app-text">{selectedDay?.isNonWorkDay ? "סמן כיום עבודה" : "סמן ללא עבודה"}</button>
           </div>
         </div>
         <div className="max-h-[460px] space-y-2 overflow-auto pe-1">
@@ -393,4 +556,53 @@ function getStatusLabel(status: string) {
   if (status === "over") return "חריג";
   if (status === "nonWork") return "לא יום עבודה";
   return "ריק";
+}
+
+
+
+type ConfirmDialogProps = {
+  title: string;
+  text: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+};
+
+function ConfirmDialog({ title, text, confirmLabel, onConfirm, onCancel }: ConfirmDialogProps) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-app-dark/30 p-4 backdrop-blur-sm md:items-center" role="presentation">
+      <section className="w-full max-w-[380px] rounded-[2rem] bg-white p-5 shadow-floating" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h2 id="confirm-title" className="text-xl font-black tracking-[-0.04em]">{title}</h2>
+        <p className="mt-2 text-sm font-bold text-app-secondary">{text}</p>
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button type="button" onClick={onConfirm} className="pill-button focus-ring bg-app-danger text-white">{confirmLabel}</button>
+          <button type="button" onClick={onCancel} className="pill-button focus-ring bg-app-soft text-app-text">ביטול</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+type ToastTone = "success" | "error" | "warning" | "info";
+
+type ToastProps = {
+  message: string;
+  tone: ToastTone;
+  onClose: () => void;
+};
+
+function Toast({ message, tone, onClose }: ToastProps) {
+  const Icon = tone === "success" ? CheckCircle : tone === "error" ? XCircle : tone === "warning" ? AlertTriangle : Info;
+  const toneClass = tone === "error" ? "bg-app-danger" : tone === "warning" ? "bg-app-warmSoft text-app-text" : "bg-app-dark text-white";
+  return (
+    <div className="fixed inset-x-4 bottom-24 z-[60] mx-auto max-w-[430px] md:bottom-8" role="status" aria-live="polite">
+      <div className={`flex items-center gap-3 rounded-[1.5rem] px-4 py-3 shadow-floating ${toneClass}`}>
+        <Icon size={20} className="shrink-0" />
+        <p className="flex-1 text-sm font-black">{message}</p>
+        <button type="button" onClick={onClose} className="focus-ring rounded-full p-1" aria-label="סגור הודעה">
+          <X size={18} />
+        </button>
+      </div>
+    </div>
+  );
 }

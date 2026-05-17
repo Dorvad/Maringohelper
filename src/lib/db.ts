@@ -1,5 +1,5 @@
 import Dexie, { type Table } from "dexie";
-import type { Client, DayRecord, Project, TimeEntry } from "../types";
+import type { Client, DayRecord, DayTemplate, Project, TimeEntry } from "../types";
 import { createId } from "./id";
 import { DEFAULT_TARGET_HOURS } from "./hours";
 
@@ -182,6 +182,47 @@ export async function deleteTimeEntry(date: string, entryId: string) {
     submittedToMaringo: false,
     updatedAt: new Date().toISOString(),
   });
+}
+
+export async function replaceDayEntries(
+  date: string,
+  entries: Array<Pick<TimeEntry, "projectId" | "clientId" | "hours" | "note">>,
+  targetHours = DEFAULT_TARGET_HOURS,
+) {
+  const day = await ensureDay(date, targetHours);
+  const now = new Date().toISOString();
+  const nextEntries: TimeEntry[] = entries.map((entry) => ({
+    id: createId("entry"),
+    createdAt: now,
+    projectId: entry.projectId,
+    clientId: entry.clientId,
+    hours: entry.hours,
+    note: entry.note,
+  }));
+
+  await db.days.update(date, {
+    targetHours: day.targetHours ?? targetHours,
+    entries: nextEntries,
+    submittedToMaringo: false,
+    isNonWorkDay: false,
+    updatedAt: now,
+  });
+}
+
+export async function findPreviousDayWithEntries(date: string) {
+  const previousDays = await db.days.where("date").below(date).reverse().toArray();
+  return previousDays.find((day) => day.entries.length > 0);
+}
+
+export async function duplicatePreviousDayEntries(date: string, targetHours = DEFAULT_TARGET_HOURS) {
+  const previousDay = await findPreviousDayWithEntries(date);
+  if (!previousDay) return undefined;
+  await replaceDayEntries(date, previousDay.entries, targetHours);
+  return previousDay;
+}
+
+export async function applyDayTemplate(date: string, template: DayTemplate, targetHours = DEFAULT_TARGET_HOURS) {
+  await replaceDayEntries(date, template.entries, targetHours);
 }
 
 export async function setSubmittedToMaringo(date: string, submitted: boolean, targetHours = DEFAULT_TARGET_HOURS) {
