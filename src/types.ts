@@ -42,6 +42,14 @@ export type DayRecord = {
   updatedAt: string;
 };
 
+export type DayTemplate = {
+  id: string;
+  name: string;
+  sourceDate: string;
+  entries: Array<Pick<TimeEntry, "projectId" | "clientId" | "hours" | "note">>;
+  createdAt: string;
+};
+
 export type AppSettings = {
   dailyTargetHours: number;
   workingDays: number[];

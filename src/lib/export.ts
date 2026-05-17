@@ -8,8 +8,12 @@ export function downloadTextFile(filename: string, contents: string, type = "tex
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  link.rel = "noopener";
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 export function dayToCopyText(day: DayRecord, projects: Project[], clients: Client[]): string {
@@ -47,7 +51,7 @@ export function makeCsv(days: DayRecord[], projects: Project[], clients: Client[
       });
     });
 
-  return rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
+  return `\uFEFF${rows.map((row) => row.map(escapeCsv).join(",")).join("\n")}`;
 }
 
 export async function downloadBackupJson() {
